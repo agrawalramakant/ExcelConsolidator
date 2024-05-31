@@ -5,7 +5,7 @@ import datetime
 import xlrd, datetime, xlwt
 from xlwt import easyxf
 from xlutils.copy import copy as xl_copy
-
+import re
 
 HEADER = 2
 EMPTY_CELL = ""
@@ -16,37 +16,44 @@ CONSIGNEE_cno = 1
 VOUCHER_cno = 2
 GSTIN_cno = 3
 GROSS_TOTAL_cno = 4
-VAL_18_cno = 5
-VAL_28_cno = 6
-SERVICE_CHARGE_cno = 7
-O_SGST_9_cno = 8
-O_CGST_9_cno = 9
-O_SGST_14_cno = 10
-O_CGST_14_cno = 11
-O_IGST_28_cno = 12
-O_IGST_18_cno = 13
-ROUND_OFF_cno = 14
-
+VAL_GST_18_cno = 5
+VAL_GST_28_cno = 6
+VAL_IGST_18_cno = 7
+VAL_IGST_28_cno = 8
+SERVICE_CHARGE_cno = 9
+O_SGST_9_cno = 10
+O_CGST_9_cno = 11
+O_SGST_14_cno = 12
+O_CGST_14_cno = 13
+O_IGST_28_cno = 14
+O_IGST_18_cno = 15
+ROUND_OFF_cno = 16
 
 DATE_txt = "Date"
-CONSIGNEE_txt = "Consignee/Buyer"
+CONSIGNEE_txt = "Consignee/Buyer"  # Particulars
 VOUCHER_txt = "Voucher No."
 GSTIN_txt = "GSTIN/UIN"
 GROSS_TOTAL_txt = "Gross Total"
-VAL_18_txt = "Sale 18%"
-VAL_28_txt = "Sale 28%"
+VAL_GST_18_txt = "GST Sale 18%"
+VAL_GST_28_txt = "GST Sale 28%"
+VAL_IGST_18_txt = "IGST Sale 18%"
+VAL_IGST_28_txt = "IGST Sale 28%"
 ROUND_OFF_txt = "R/O"
 SERVICE_CHARGE_txt = "Serv.Ch."
 CGST_txt = "CGST"
 SGST_txt = "SGST"
 IGST_txt = "IGST"
-CASH_SALES = "Cash Sales"
+CASH_SALES = "Cash"
 SUNDRY_DEBTORS = "Sundry Debtors"
-text_cno_mapping = [(GROSS_TOTAL_cno, GROSS_TOTAL_txt), (VAL_18_cno, VAL_18_txt), (VAL_28_cno, VAL_28_txt), (SERVICE_CHARGE_cno, SERVICE_CHARGE_txt)]
-numeric_cols = [GROSS_TOTAL_cno, VAL_18_cno, VAL_28_cno, SERVICE_CHARGE_cno, O_CGST_9_cno, O_CGST_14_cno, O_SGST_9_cno,
+text_cno_mapping = [(GROSS_TOTAL_cno, GROSS_TOTAL_txt), (VAL_GST_18_cno, VAL_GST_18_txt),
+                    (VAL_GST_28_cno, VAL_GST_28_txt), (VAL_IGST_18_cno, VAL_IGST_18_txt),
+                    (VAL_IGST_28_cno, VAL_IGST_28_txt), (SERVICE_CHARGE_cno, SERVICE_CHARGE_txt)]
+numeric_cols = [GROSS_TOTAL_cno, VAL_GST_18_cno, VAL_GST_28_cno, VAL_IGST_18_cno, VAL_IGST_28_cno, SERVICE_CHARGE_cno,
+                O_CGST_9_cno, O_CGST_14_cno, O_SGST_9_cno,
                 O_SGST_14_cno, O_IGST_18_cno, O_IGST_28_cno, ROUND_OFF_cno]
 final = {}
 index_tracker = {}
+
 
 class XlConsolidator(Tk):
     def __init__(self):
@@ -65,7 +72,7 @@ class XlConsolidator(Tk):
         excel_file_path_label = Label(self, text="Excel file Path", anchor=NE)
         excel_file_path_label.grid(row=0, column=0, sticky=W)
         excel_file_path_entry = Entry(self, textvariable=excel_file_path,
-                                     bd=1, width=30, relief=SUNKEN, state='readonly')
+                                      bd=1, width=30, relief=SUNKEN, state='readonly')
         excel_file_path_entry.xview_moveto(0.5)
         excel_file_path_entry.grid(row=0, column=1)
         Button(self, text="Browse", fg="black", bd=0, bg="#fff", cursor="hand2",
@@ -128,7 +135,8 @@ class XlConsolidator(Tk):
         write_sheet.write(row_index, 0, DATE_txt)
         write_sheet.write(row_index, 1, CONSIGNEE_txt)
         write_sheet.write(row_index, 2, VOUCHER_txt)
-        col_index = 3
+        write_sheet.write(row_index, 3, GSTIN_txt)
+        col_index = 4
         for tuple in text_cno_mapping:
             write_sheet.write(row_index, col_index, tuple[1])
             col_index += 1
@@ -139,8 +147,10 @@ class XlConsolidator(Tk):
 
         # write data
         style_blue = xlwt.easyxf(
-            'pattern: pattern solid, fore_colour light_blue;' 'font: name arial narrow, height 180, colour white, bold True;')
-        style_white = easyxf('pattern: pattern solid, fore_colour white')
+            'pattern: pattern solid, fore_colour light_blue;' 'font: name arial, height 180, colour white, bold True;')
+        style_white = easyxf(
+            'pattern: pattern solid, fore_colour white;' 'font: name arial, height 180;')
+
         old_date = datetime.date.today()
         odd = 1
         row_index += 1
@@ -150,10 +160,15 @@ class XlConsolidator(Tk):
                 odd += 1
                 old_date = date
             consignee = key.split(key_delimiter)[2]
-            write_sheet.write(row_index, 0, date, style_blue if odd % 2 == 0 else style_white)
-            write_sheet.write(row_index, 1, consignee, style_blue if odd % 2 == 0 else style_white)
-            write_sheet.write(row_index, 2, value[VOUCHER_txt], style_blue if odd % 2 == 0 else style_white)
-            col_index = 3
+            date_object = datetime.datetime.strptime(date, '%Y-%m-%d')
+            write_sheet.write(row_index, 0, date_object.strftime("%d-%m-%y"),
+                              style_blue if odd % 2 == 0 else style_white)
+            write_sheet.write(row_index, 1, XlConsolidator.remove_trailing_numbers(consignee),
+                              style_blue if odd % 2 == 0 else style_white)
+            write_sheet.write(row_index, 2, XlConsolidator.sanitize_voucher_number(value[VOUCHER_txt], consignee),
+                              style_blue if odd % 2 == 0 else style_white)
+            write_sheet.write(row_index, 3, value[GSTIN_txt], style_blue if odd % 2 == 0 else style_white)
+            col_index = 4
             for tuple in text_cno_mapping:
                 write_sheet.write(row_index, col_index, value[tuple[1]], style_blue if odd % 2 == 0 else style_white)
                 col_index += 1
@@ -165,11 +180,10 @@ class XlConsolidator(Tk):
                               style_blue if odd % 2 == 0 else style_white)
             row_index += 1
         write_sheet.write(row_index, 1, "Total:")
-        for i in range(2, 10):
+        for i in range(3, 11):
             write_sheet.write(row_index, i, xlwt.Formula(f"SUM(${XlConsolidator.get_column(i)}$1:"
-                                                         f"${XlConsolidator.get_column(i)}${row_index})"))
+                                                         f"${XlConsolidator.get_column(i)}${row_index})"), style_white)
 
-        
         import os
         filename, file_extension = os.path.splitext(input_file)
         write_book.save(filename + "-edited.xls")
@@ -186,9 +200,29 @@ class XlConsolidator(Tk):
             6: "G",
             7: "H",
             8: "I",
-            9: "J"
+            9: "J",
+            10: "K"
         }
         return switcher.get(colno)
+
+    @staticmethod
+    def remove_trailing_numbers(input_string):
+        # Find the position of the first number
+        match = re.search(r'\d', input_string)
+        if match:
+            first_number_index = match.start()
+            # Convert the string to title case and truncate before the first number
+            result = input_string[:first_number_index].title()
+            return result.rstrip().rstrip('-').rstrip()
+        else:
+            # If no number found, just convert the whole string to title case
+            return input_string.title().rstrip()
+
+    @staticmethod
+    def sanitize_voucher_number(voucher_no, consignee_txt):
+        if consignee_txt == 'Cash' or consignee_txt == SUNDRY_DEBTORS:
+            return ''
+        return voucher_no
 
     def log(self, msg):
         self.status_var.set(msg)
@@ -211,22 +245,25 @@ class XlConsolidator(Tk):
         cell_val = row[cno].value
         if (type(cell_val) is not float or int) and cell_val is EMPTY_CELL and cno in numeric_cols:
             cell_val = 0.0
+        if str(cell_val).strip() == '-':
+            cell_val = 0.0
+        # print(f"returning {cell_val}")
         return cell_val
 
     @staticmethod
     def get_CGST(row):
         return round(XlConsolidator.get_cell_val(row, O_CGST_9_cno), 2) + \
-               round(XlConsolidator.get_cell_val(row, O_CGST_14_cno), 2)
+            round(XlConsolidator.get_cell_val(row, O_CGST_14_cno), 2)
 
     @staticmethod
     def get_SGST(row):
         return round(XlConsolidator.get_cell_val(row, O_SGST_9_cno), 2) + \
-               round(XlConsolidator.get_cell_val(row, O_SGST_14_cno), 2)
+            round(XlConsolidator.get_cell_val(row, O_SGST_14_cno), 2)
 
     @staticmethod
     def get_IGST(row):
         return round(XlConsolidator.get_cell_val(row, O_IGST_18_cno), 2) + \
-               round(XlConsolidator.get_cell_val(row, O_IGST_28_cno), 2)
+            round(XlConsolidator.get_cell_val(row, O_IGST_28_cno), 2)
 
     @staticmethod
     def add_to_final(row):
@@ -250,6 +287,7 @@ class XlConsolidator(Tk):
                     print(row)
                     print(e)
                     pass
+                print("cell value: " + str(cell_val))
                 cell_val = round(cell_val, 2)
                 temp[tuple[1]] = cell_val
             temp[VOUCHER_txt] = row[VOUCHER_cno].value
@@ -284,7 +322,6 @@ class StartPage(Frame):
     def __init__(self, master):
         Frame.__init__(self, master)
         Label(self, text="This is the start page").grid(row=0, column=0, padx=1, pady=1)
-
 
 
 if __name__ == "__main__":
